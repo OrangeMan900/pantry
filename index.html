@@ -467,6 +467,25 @@ $("gear").onclick = e => {
 pop.onclick = e => e.stopPropagation();
 document.addEventListener("click", closePop);
 document.addEventListener("keydown", e => { if (e.key === "Escape") closePop(); });
+
+/* keyboard shortcuts on the watch page: F = fullscreen, Space or K = play/pause */
+document.addEventListener("keydown", e => {
+  if (view !== "watch" || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+  const key = e.key.toLowerCase();
+  if (key !== "f" && key !== "k" && e.key !== " ") return;
+  const t = e.target, tag = t.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t.isContentEditable) return;   /* typing */
+  const p = $("player");
+  if (e.key === " " && (t === p || tag === "BUTTON" || tag === "A")) return;                        /* let the control do its own thing */
+  e.preventDefault();
+  if (key === "f") {
+    const full = document.fullscreenElement || document.webkitFullscreenElement;
+    if (full) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    else { const go = p.requestFullscreen || p.webkitRequestFullscreen; if (go) { const r = go.call(p); if (r && r.catch) r.catch(() => {}); } }
+  } else {
+    if (p.paused) p.play().catch(() => {}); else p.pause();
+  }
+});
 const refreshRecs = () => view === "watch" ? renderUpNext() : render();
 $("optRec").onchange = e => { settings.personalize = e.target.checked; saveSettings(); refreshRecs(); };
 $("optReset").onclick = () => { profile = blank(); saveProfile(); $("optReset").disabled = true; refreshRecs(); };
