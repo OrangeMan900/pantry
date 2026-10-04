@@ -33,6 +33,11 @@ aside h3{font-size:16px;font-weight:500;padding:12px 12px 6px;border-top:1px sol
 .sbtn span.nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 main{margin-left:240px;padding:0 24px 60px}
 body.noside aside{display:none}body.noside main{margin-left:0}
+body.watching aside{display:none}body.watching main{margin-left:0}
+body.watching.drawer aside{display:block;z-index:40;box-shadow:0 4px 32px rgba(0,0,0,.3)}
+#scrim{display:none;position:fixed;inset:0;z-index:35;background:rgba(0,0,0,.4)}
+body.watching.drawer #scrim{display:block}
+#watch{padding-top:24px}
 .chips{display:flex;gap:12px;overflow-x:auto;position:sticky;top:calc(56px + env(safe-area-inset-top,0px));z-index:5;background:var(--bg);padding:12px 0;margin-bottom:12px}
 .chip{border:0;background:var(--chip);padding:0 12px;height:32px;border-radius:8px;white-space:nowrap;font-size:14px;font-weight:500}
 .chip:hover{background:var(--chip2)}
@@ -52,14 +57,25 @@ body.noside aside{display:none}body.noside main{margin-left:0}
 .byline{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 6px;color:var(--muted);font-size:14px}
 .sub{color:var(--muted);font-size:14px}
 .empty{grid-column:1/-1;text-align:center;padding:80px 0;color:var(--muted)}
-.back{border:0;background:var(--chip);border-radius:18px;padding:0 14px;height:36px;margin:16px 0 8px;font-weight:500;font-size:14px}
-.back:hover{background:var(--chip2)}
 .chhead{display:flex;gap:24px;align-items:center;padding:24px 0}
 .chhead .av{width:128px;height:128px;font-size:52px}
 .chhead h1{font-size:36px;font-weight:700;letter-spacing:-.02em;line-height:1.2}
 .chdesc{margin-top:8px;max-width:70ch;white-space:pre-wrap;color:var(--muted);font-size:14px}
 .tabs{border-bottom:1px solid var(--line);margin-bottom:24px}
-.tabs span{display:inline-block;padding:12px 16px;font-weight:500;font-size:14px;border-bottom:2px solid var(--ink)}
+.shelfh{font-size:20px;font-weight:700;line-height:1.3;margin:0 0 16px}
+.shelf{display:flex;gap:16px;overflow-x:auto;padding-bottom:12px;margin-bottom:28px}
+.scard{width:240px;flex-shrink:0}
+.scard .title{font-size:14px;margin:8px 0 2px}
+.tabs{display:flex}
+.tab{background:none;border:0;padding:12px 16px;font-weight:500;font-size:14px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab:hover{color:var(--ink)}
+.tab.active{color:var(--ink);border-bottom-color:var(--ink)}
+.grid .scard{width:auto}
+.grid .scard .title{font-size:16px}
+.grid.sm{grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:28px 16px}
+.grid.sm .scard .title{font-size:14px}
+.scard.lg{width:400px}
+.scard.lg .title{font-size:16px}
 .results{display:flex;flex-direction:column;gap:16px;max-width:1100px;margin:0 auto}
 .chrows{max-width:1100px;margin:16px auto 8px;border-bottom:1px solid var(--line);padding-bottom:8px}
 .chrow{display:flex;gap:24px;align-items:center;width:100%;text-align:left;background:none;border:0;padding:16px 0}
@@ -102,7 +118,7 @@ button.prow:disabled{opacity:.5;cursor:default}
 .tag:hover{text-decoration:underline}
 .hidden{display:none!important}
 @media (max-width:1000px){.wrap{flex-direction:column}.secondary{width:100%}}
-@media (max-width:900px){aside,#menu{display:none}main{margin-left:0;padding:0 12px 40px}header{grid-template-columns:auto 1fr auto}
+@media (max-width:900px){.scard.lg{width:280px}aside,#menu{display:none}main{margin-left:0;padding:0 12px 40px}header{grid-template-columns:auto 1fr auto}
  .res{flex-direction:column}.res .thumb{width:100%}.chhead .av{width:72px;height:72px;font-size:30px}.chhead h1{font-size:24px}.chrow .av{width:72px;height:72px;margin:0 8px 0 0;font-size:30px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -127,11 +143,11 @@ button.prow:disabled{opacity:.5;cursor:default}
   </div>
 </header>
 <aside id="side"></aside>
+<div id="scrim"></div>
 <main>
   <div id="top"></div>
   <div class="grid" id="grid"></div>
   <section class="hidden" id="watch">
-    <button class="back" id="back">← Back</button>
     <div class="wrap">
       <div class="primary">
         <video id="player" controls playsinline></video>
@@ -189,6 +205,8 @@ const VIDEOS = [
 ];
 
 const $ = id => document.getElementById(id);
+/* only rewrite a section of the page if its content actually changed (keeps scroll, focus and playback untouched) */
+const setHTML = (el, html) => { if (el._h !== html) { el.innerHTML = html; el._h = html; } };
 const esc = t => String(t).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 const channelById = id => CHANNELS.find(c => c.id === id) || { id, name: id, description: "", avatar: "" };
@@ -252,6 +270,19 @@ function fmtDate(d) {
   return new Date(y, m - 1, day).toLocaleDateString("en-US", opts);
 }
 
+/* "2026-10-02" -> "Today", "2d ago", "1w ago", "3m ago", "1y ago" (whole days only, no times) */
+function ago(d, now = new Date()) {
+  if (!d) return "";
+  const [y, m, day] = d.split("-").map(Number);
+  const days = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(y, m - 1, day)) / 864e5);
+  if (days < 1) return "Today";
+  if (days < 7) return `${days}d ago`;
+  if (days < 30) return `${Math.floor(days / 7)}w ago`;
+  let months = (now.getFullYear() - y) * 12 + (now.getMonth() - (m - 1)) - (now.getDate() < day ? 1 : 0);
+  months = Math.max(1, months);
+  return months < 12 ? `${months}m ago` : `${Math.floor(months / 12)}y ago`;
+}
+
 /* 110 -> "1:50", 3725 -> "1:02:05" */
 function fmtDur(s) {
   s = Math.floor(s || 0);
@@ -278,12 +309,16 @@ function loadDurations() {
 
 /* ---------- building blocks ---------- */
 const thumb = v => `<button class="thumb" data-i="${v.i}" aria-label="Play ${esc(v.title)}">${v.thumbnail ? `<img src="${esc(v.thumbnail)}" alt="" loading="lazy">` : ""}<span class="dur" data-i="${v.i}"></span></button>`;
-const byline = v => `<div class="byline"><button class="chan" data-channel="${esc(v.channel)}">${esc(channelById(v.channel).name)}</button>${v.released ? `<span>•</span><span>${fmtDate(v.released)}</span>` : ""}</div>`;
+const byline = v => `<div class="byline"><button class="chan" data-channel="${esc(v.channel)}">${esc(channelById(v.channel).name)}</button>${v.released ? `<span>•</span><span title="${fmtDate(v.released)}">${ago(v.released)}</span>` : ""}</div>`;
 const titleBtn = v => `<button class="title" data-i="${v.i}">${esc(v.title)}</button>`;
 
 const card = v => `<article class="card">${thumb(v)}<div class="meta">
   <button class="avbtn" data-channel="${esc(v.channel)}" aria-label="${esc(channelById(v.channel).name)} channel">${avatar(channelById(v.channel))}</button>
   <div>${titleBtn(v)}${byline(v)}</div></div></article>`;
+
+const shelfCard = v => `<article class="scard">${thumb(v)}${titleBtn(v)}<div class="byline">${v.released ? `<span title="${fmtDate(v.released)}">${ago(v.released)}</span>` : ""}</div></article>`;
+
+const scardLg = v => shelfCard(v).replace('class="scard"', 'class="scard lg"');
 
 const mini = v => `<article class="mini">${thumb(v)}<div>${titleBtn(v)}${byline(v)}</div></article>`;
 
@@ -298,17 +333,13 @@ const channelRow = c => `<button class="chrow" data-channel="${esc(c.id)}">${ava
 const ICON_HOME = '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M12 4.33l7 6.12V20h-4v-6H9v6H5v-9.55l7-6.12M12 3L4 10v11h6v-6h4v6h6V10l-8-7z"/></svg>';
 
 /* ---------- screens: home, channel, watch ---------- */
-let view = "home", channelId = null, chip = null;
-let lastList = { view: "home", channelId: null };   /* where Back returns to */
-let prev = null, curIndex = null;                    /* screen to return to from a channel page */
+let view = "home", channelId = null, chip = null, chTab = "home";
+let curIndex = null;
 
-function go(name, id, isBack) {
+function go(name, id) {
   $("player").pause();
-  if (name === "channel" && !isBack && !(view === "channel" && channelId === id))
-    prev = { view, channelId, q: $("q").value, i: curIndex, lastList: { ...lastList } };
   view = name; channelId = id || null;
-  if (name === "channel") $("q").value = "";
-  lastList = { view: name, channelId };
+  if (name === "channel") { $("q").value = ""; chTab = "home"; }
   render();
   window.scrollTo(0, 0);
 }
@@ -316,32 +347,40 @@ function goHome() { $("q").value = ""; chip = null; go("home"); }
 
 function renderSide() {
   const homeOn = view === "home" && !$("q").value.trim() && !chip;
-  $("side").innerHTML = `<button class="sbtn ${homeOn ? "active" : ""}" data-home>${ICON_HOME}<span class="nm">Home</span></button>
+  setHTML($("side"), `<button class="sbtn ${homeOn ? "active" : ""}" data-home>${ICON_HOME}<span class="nm">Home</span></button>
     ${CHANNELS.length ? "<h3>Channels</h3>" : ""}` +
-    CHANNELS.map(c => `<button class="sbtn ${view === "channel" && channelId === c.id ? "active" : ""}" data-channel="${esc(c.id)}">${avatar(c)}<span class="nm">${esc(c.name)}</span></button>`).join("");
+    CHANNELS.map(c => `<button class="sbtn ${view === "channel" && channelId === c.id ? "active" : ""}" data-channel="${esc(c.id)}">${avatar(c)}<span class="nm">${esc(c.name)}</span></button>`).join(""));
 }
 
 function render() {
   const watching = view === "watch";
   $("watch").classList.toggle("hidden", !watching);
+  document.body.classList.toggle("watching", watching);
+  if (!watching) document.body.classList.remove("drawer");
   $("top").classList.toggle("hidden", watching);
   $("grid").classList.toggle("hidden", watching);
   renderSide();
   if (watching) return;
 
   const q = $("q").value.trim().toLowerCase();
-  let top = "", list = withIndex(), empty = "No videos yet.", asList = false;
+  let top = "", list = withIndex(), empty = "No videos yet.", asList = false, gridCls = "grid", cardFn = card;
 
   if (view === "channel") {
     const c = channelById(channelId);
     list = list.filter(v => v.channel === c.id);
-    top = `<button class="back" data-back>← Back</button>
-      <div class="chhead">${avatar(c)}<div><h1>${esc(c.name)}</h1>
+    top = `<div class="chhead">${avatar(c)}<div><h1>${esc(c.name)}</h1>
         <div class="sub">@${esc(c.id)} • ${plural(list.length, "video")}</div>
         <p class="chdesc">${esc(c.description || "No description yet.")}</p></div></div>
-      <div class="tabs"><span>Videos</span></div>`;
+      <div class="tabs">${["home", "videos"].map(t => `<button class="tab ${chTab === t ? "active" : ""}" data-tab="${t}">${t === "home" ? "Home" : "Videos"}</button>`).join("")}</div>`;
+    cardFn = shelfCard;
+    if (chTab === "home") {
+      gridCls = "grid sm";
+      const foryou = settings.personalize ? ranked(list, null).slice(0, 6) : [];   /* Pantry's picks from this channel */
+      if (foryou.length) top += `<h2 class="shelfh">For you</h2><div class="shelf">${foryou.map(scardLg).join("")}</div>`;
+      top += `<h2 class="shelfh">Videos</h2>`;
+    }
   } else if (q) {
-    asList = true;
+    asList = true; gridCls = "results"; cardFn = result;
     const tagQ = q.startsWith("#") ? q.slice(1) : null;
     const chans = tagQ ? [] : CHANNELS.filter(c => (c.name + " " + (c.description || "")).toLowerCase().includes(q));
     list = tagQ ? list.filter(v => tagsOf(v).includes(tagQ))
@@ -358,52 +397,54 @@ function render() {
   }
 
   list = (view === "home" && !q) ? ranked(list, null) : list.sort(newestFirst);
-  $("top").innerHTML = top;
-  $("grid").className = asList ? "results" : "grid";
-  $("grid").innerHTML = list.length ? list.map(asList ? result : card).join("")
-    : (top && view === "home" && q ? "" : `<div class="empty">${empty}</div>`);
+  setHTML($("top"), top);
+  $("grid").className = gridCls;
+  setHTML($("grid"), list.length ? list.map(cardFn).join("")
+    : (top && view === "home" && q ? "" : `<div class="empty">${empty}</div>`));
   loadDurations();
 }
 
 function renderUpNext() {
   if (curIndex == null) return;
-  $("upnext").innerHTML = ranked(withIndex().filter(x => x.i !== curIndex), VIDEOS[curIndex]).map(mini).join("");
+  setHTML($("upnext"), ranked(withIndex().filter(x => x.i !== curIndex), VIDEOS[curIndex]).map(mini).join(""));
   loadDurations();
+}
+
+/* fills in the text on the watch page (never touches the player, so the video keeps playing) */
+function fillWatch() {
+  if (curIndex == null) return;
+  const v = VIDEOS[curIndex], c = channelById(v.channel);
+  setHTML($("wTags"), tagsOf(v).map(t => `<button class="tag" data-tag="${esc(t)}">#${esc(t)}</button>`).join(""));
+  $("wTitle").textContent = v.title;
+  setHTML($("wAv"), avatar(c));
+  $("wAv").dataset.channel = c.id;
+  $("wChan").textContent = c.name;
+  $("wChan").dataset.channel = c.id;
+  $("wSub").textContent = plural(countOf(c.id), "video");
+  $("wDate").textContent = ago(v.released);
+  $("wDate").title = fmtDate(v.released);
+  $("wDesc").textContent = v.description || "No description.";
+  renderUpNext();
 }
 
 function showVideo(i, noRecord) {
   const v = VIDEOS[i], c = channelById(v.channel);
   if (!noRecord) record(v);
   curIndex = i;
+  document.body.classList.remove("drawer");
   view = "watch";
   render();
   $("player").poster = v.thumbnail || "";
   $("player").src = v.url;
   $("player").play().catch(() => {});
-  $("wTags").innerHTML = tagsOf(v).map(t => `<button class="tag" data-tag="${esc(t)}">#${esc(t)}</button>`).join("");
-  $("wTitle").textContent = v.title;
-  $("wAv").innerHTML = avatar(c);
-  $("wAv").dataset.channel = c.id;
-  $("wChan").textContent = c.name;
-  $("wChan").dataset.channel = c.id;
-  $("wSub").textContent = plural(countOf(c.id), "video");
-  $("wDate").textContent = fmtDate(v.released);
-  $("wDesc").textContent = v.description || "No description.";
-  renderUpNext();
+  fillWatch();
   window.scrollTo(0, 0);
 }
 
-function goBack() {
-  const p = prev;
-  if (!p) return go("home");
-  $("q").value = p.q;
-  if (p.view === "watch") { lastList = p.lastList; showVideo(p.i, true); }
-  else go(p.view, p.channelId, true);
-}
-
 document.addEventListener("click", e => {
-  if (e.target.closest("[data-back]")) return goBack();
   if (e.target.closest("[data-home]")) return goHome();
+  const tb = e.target.closest("[data-tab]");
+  if (tb) { chTab = tb.dataset.tab; return render(); }
   const tg = e.target.closest("[data-tag]");
   if (tg) { chip = null; $("q").value = "#" + tg.dataset.tag; return go("home"); }
   const ch = e.target.closest("[data-channel]");
@@ -413,7 +454,6 @@ document.addEventListener("click", e => {
   const vid = e.target.closest("[data-i]:not(.dur)");
   if (vid) showVideo(+vid.dataset.i);
 });
-$("back").onclick = () => go(lastList.view, lastList.channelId);
 $("logo").onclick = goHome;
 const pop = $("pop");
 function closePop() { pop.classList.add("hidden"); $("gear").setAttribute("aria-expanded", "false"); }
@@ -430,8 +470,20 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") closePop(); 
 const refreshRecs = () => view === "watch" ? renderUpNext() : render();
 $("optRec").onchange = e => { settings.personalize = e.target.checked; saveSettings(); refreshRecs(); };
 $("optReset").onclick = () => { profile = blank(); saveProfile(); $("optReset").disabled = true; refreshRecs(); };
-$("menu").onclick = () => document.body.classList.toggle("noside");
+$("menu").onclick = () => document.body.classList.toggle(view === "watch" ? "drawer" : "noside");
+$("scrim").onclick = () => document.body.classList.remove("drawer");
 $("sbtn").onclick = () => $("q").focus();
+/* After every click: re-check the current screen and update only what changed (ages, recommendations, counts).
+   It never changes screens, tabs, search or scroll position. */
+function softRefresh() {
+  const y = window.scrollY;
+  const rows = [...document.querySelectorAll(".chips, .shelf")].map(el => [el.className, el.scrollLeft]);
+  render();
+  if (view === "watch") fillWatch();
+  document.querySelectorAll(".chips, .shelf").forEach(el => { const r = rows.find(x => x[0] === el.className); if (r) el.scrollLeft = r[1]; });
+  window.scrollTo(0, y);
+}
+document.addEventListener("click", () => setTimeout(softRefresh, 0), true);
 $("q").oninput = () => { if (view !== "home") go("home"); else render(); };
 
 render();
